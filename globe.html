@@ -1,0 +1,133 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <script src="https://www.webglearth.com/v2/api.js"></script>
+    <script>
+    function destinationPoint(lat, lon, distance, bearing) {
+        var radius = 6371e3; // (Mean) radius of earth
+
+        var toRadians = function(v) { return v * Math.PI / 180; };
+        var toDegrees = function(v) { return v * 180 / Math.PI; };
+
+        // sinphi2 = sinphi1·cosDelta + cosphi1·sinDelta·costheta
+        // tanDeltalambda = sintheta·sinDelta·cosphi1 / cosDelta−sinphi1·sinphi2
+        // see mathforum.org/library/drmath/view/52049.html for derivation
+
+        var Delta = Number(distance) / radius; // angular distance in radians
+        var theta = toRadians(Number(bearing));
+
+        var phi1 = toRadians(Number(lat));
+        var lambda1 = toRadians(Number(lon));
+
+        var sinphi1 = Math.sin(phi1), cosphi1 = Math.cos(phi1);
+        var sinDelta = Math.sin(Delta), cosDelta = Math.cos(Delta);
+        var sintheta = Math.sin(theta), costheta = Math.cos(theta);
+
+        var sinphi2 = sinphi1*cosDelta + cosphi1*sinDelta*costheta;
+        var phi2 = Math.asin(sinphi2);
+        var y = sintheta * sinDelta * cosphi1;
+        var x = cosDelta - sinphi1 * sinphi2;
+        var lambda2 = lambda1 + Math.atan2(y, x);
+
+        return [toDegrees(phi2), (toDegrees(lambda2)+540)%360-180]; // normalise to −180..+180°
+      }
+
+      let searchParams = new URLSearchParams(window.location.search)
+      var flightid = searchParams.get('flightid')
+      var serverid = searchParams.get('serverid')
+      var airportalt = searchParams.get('airportalt')
+      var globedelay = searchParams.get('globedelay')
+      console.log(flightid, serverid)
+
+      var heading = 0
+      var speed = 300
+      var altitude = 30000
+      var vs = 0
+      var earth;
+
+      function initialize() {
+        earth = new WE.map('earth_div');
+        WE.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+          attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+        }).addTo(earth);
+        //earth.setAltitude(30000)
+        earth.setTilt(90)
+        update()
+        var before = null;
+        requestAnimationFrame(function animate(now) {
+            var c = earth.getPosition();
+            var elapsed = before? now - before: 0;
+            before = now;
+            var p =   destinationPoint(c[0], c[1], 0.001*((speed/1.94384)*elapsed), heading)
+            var lat = p[0]
+            var long = p[1]
+            earth.setView([lat, long]);
+            earth.setTilt(85)
+            earth.setHeading(360-heading)
+            altitude += 0.001*vs*elapsed/60
+            if (altitude < 200 && vs < 0){
+              vs = -450
+            }
+            if (altitude < 20 && vs < 0){
+              vs = -300
+            }
+            if (altitude < 10 && vs < 0){
+              vs = -200
+            }
+            if (altitude <= 0){
+              altitude = 0
+              vs = 0
+            }
+            if (Math.round(altitude) % 100 === 0){
+              console.log(Math.round(altitude))
+            }
+            //console.log(altitude)
+            earth.setAltitude(altitude)
+            requestAnimationFrame(animate);
+        });
+      }
+
+
+      function update(){
+          console.log('updating')
+          var xhr = new XMLHttpRequest()
+          xhr.open('GET', "https://ifhubapi.onrender.com/flights?apikey=ZNvNHJYC5IcLYUMlFpBI&sessionid=" + serverid, true);
+          xhr.send();
+          xhr.addEventListener("readystatechange", processRequest, false);
+          function processRequest(e) {
+            if (xhr.readyState == 4 && xhr.status == 200) {
+              response = JSON.parse(xhr.responseText);
+              for (var i=0; i < response.length-1; i++){
+                if (response[i].flightId == flightid){
+                  heading = response[i].heading
+                  speed = response[i].speed
+                  altitude = response[i].altitude - airportalt
+                  vs = response[i].verticalSpeed
+                  altitude += (vs/60)*globedelay
+                  if (speed < 50 || altitude < 0){
+                    altitude = 0
+                  }
+                  p = destinationPoint(response[i].latitude, response[i].longitude, ((speed/1.94384)*globedelay), heading)
+                  earth.setView([p[0], p[1]])
+                  console.log([response[i].latitude, response[i].longitude])
+                  break
+                }
+              }
+            }
+          }
+        }
+
+      const interval = setInterval(update, 30000);
+
+    </script>
+    <style>
+      html, body{padding: 0; margin: 0; background: #87CEEB}
+      #earth_div{top: 0; right: 0; bottom: 0; left: 0; position: absolute !important;}
+    </style>
+    <title>WebGL Earth API: Hello World example</title>
+    <meta name="description" content="This is a basic tutorial for showing a map on a 3D globe. It could be used on web and Android & iOS mobile devices.">
+  </head>
+  <body onload="initialize()">
+    <div id="earth_div"></div>
+  </body>
+</html>
